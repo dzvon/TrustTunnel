@@ -27,7 +27,7 @@ pub struct Settings {
     /// The TLS host info of service messenger
     pub(crate) service_messenger_tls_host_info: Option<TlsHostInfo>,
     /// IPv6 availability
-    #[serde(default)]
+    #[serde(default = "Settings::default_ipv6_available")]
     pub(crate) ipv6_available: bool,
     /// Time out of a TLS handshake
     #[serde(default = "Settings::default_tls_handshake_timeout")]
@@ -249,6 +249,10 @@ impl Settings {
         SocketAddr::from((Ipv4Addr::UNSPECIFIED, 443))
     }
 
+    fn default_ipv6_available() -> bool {
+        true
+    }
+
     fn default_authorizer() -> Arc<dyn Authorizer> {
         Arc::new(DummyAuthorizer {})
     }
@@ -388,7 +392,7 @@ impl SettingsBuilder {
                 listen_address: Settings::default_listen_address(),
                 tunnel_tls_host_info: Default::default(),
                 service_messenger_tls_host_info: None,
-                ipv6_available: true,
+                ipv6_available: Settings::default_ipv6_available(),
                 tls_handshake_timeout: Settings::default_tls_handshake_timeout(),
                 client_listener_timeout: Settings::default_client_listener_timeout(),
                 tcp_connections_timeout: Settings::default_tcp_connections_timeout(),
