@@ -509,7 +509,7 @@ fn encode_udp_chunk(destination: &SocketAddr, payload: &[u8]) -> Vec<u8> {
     const SOURCE_PORT: u16 = 1234;
 
     let mut buffer = vec![];
-    buffer.put_u32((4 + 2 * (16 + 2) + 1 + APP_NAME.len() + payload.len()) as u32);
+    buffer.put_u32((2 * (16 + 2) + 1 + APP_NAME.len() + payload.len()) as u32);
     buffer.put_slice(&[0; 12]);
     buffer.put_slice(&SOURCE_IP.octets());
     buffer.put_u16(SOURCE_PORT);

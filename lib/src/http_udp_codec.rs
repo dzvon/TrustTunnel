@@ -137,7 +137,7 @@ impl Decoder {
                 None => return Bytes::new(),
             };
 
-        let payload_length = self.total_length - UDPPKT_IN_FIXED_HEADER_SIZE - length;
+        let payload_length = self.total_length - UDPPKT_IN_FIXED_HEADER_NO_LENGTH_SIZE - length;
         match std::str::from_utf8(name.as_ref()) {
             Ok(name) => {
                 self.app_name = Some(name.to_string());
@@ -257,7 +257,7 @@ mod tests {
     use bytes::{BufMut, Bytes};
     use crate::http_datagram_codec::{Decoder, DecodeResult};
     use crate::http_udp_codec;
-    use crate::http_udp_codec::UDPPKT_IN_FIXED_HEADER_SIZE;
+    use crate::http_udp_codec::UDPPKT_IN_FIXED_HEADER_NO_LENGTH_SIZE;
     use crate::log_utils::IdChain;
 
     #[test]
@@ -270,7 +270,7 @@ mod tests {
         const DESTINATION_PORT: u16 = 9876;
 
         let mut buffer = vec![];
-        buffer.put_u32((UDPPKT_IN_FIXED_HEADER_SIZE + APP_NAME.len() + PAYLOAD.len()) as u32);
+        buffer.put_u32((UDPPKT_IN_FIXED_HEADER_NO_LENGTH_SIZE + APP_NAME.len() + PAYLOAD.len()) as u32);
         buffer.put_slice(&[0; 12]);
         buffer.put_slice(&SOURCE_IP.octets());
         buffer.put_u16(SOURCE_PORT);
