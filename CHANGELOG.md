@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 0.9.47
+
 * Removed RADIUS-based authenticator
 
 ## 0.9.45
