@@ -48,7 +48,7 @@ Increment version:
             git reset
 
             ./scripts/increment_version.sh ./endpoint/Cargo.toml ${bamboo_custom_version}
-            git add ./endpoint/Cargo.toml CHANGELOG.md
+            git add ./endpoint/Cargo.toml Cargo.lock CHANGELOG.md
 
             git commit -m "skipci: Automatic version increment by Bamboo"
             git push
