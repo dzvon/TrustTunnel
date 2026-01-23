@@ -131,6 +131,16 @@ impl RulesEngine {
     /// Evaluate connection against all rules
     /// Returns the action from the first matching rule, or Allow if no rules match
     pub fn evaluate(&self, client_ip: &IpAddr, client_random: Option<&[u8]>) -> RuleEvaluation {
+        if client_random.is_none()
+            && self
+                .rules
+                .rule
+                .iter()
+                .any(|r| r.client_random_prefix.is_some())
+        {
+            return RuleEvaluation::Deny;
+        }
+
         for rule in &self.rules.rule {
             if rule.matches(client_ip, client_random) {
                 return match rule.action {
@@ -239,6 +249,22 @@ mod tests {
         assert_eq!(engine.evaluate(&ip_deny, None), RuleEvaluation::Deny);
         assert_eq!(engine.evaluate(&ip_allow, None), RuleEvaluation::Allow);
         assert_eq!(engine.evaluate(&ip_default, None), RuleEvaluation::Deny); // Default deny
+    }
+
+    #[test]
+    fn test_rules_engine_fails_closed_without_client_random() {
+        let rules = RulesConfig {
+            rule: vec![Rule {
+                cidr: None,
+                client_random_prefix: Some("aabbcc".to_string()),
+                action: RuleAction::Allow,
+            }],
+        };
+
+        let engine = RulesEngine::from_config(rules);
+        let ip = IpAddr::from_str("127.0.0.1").unwrap();
+
+        assert_eq!(engine.evaluate(&ip, None), RuleEvaluation::Deny);
     }
 
     #[test]

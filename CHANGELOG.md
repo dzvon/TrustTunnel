@@ -1,5 +1,7 @@
 # CHANGELOG
 
+- Fixed an issue where client_random_prefix rules didn’t match when Anti-DPI or post-quantum cryptography was enabled.
+
 ## 0.9.114
 
 - Fixed an issue where allow_private_network_connections set to false could be bypassed
