@@ -49,7 +49,7 @@ pub(crate) trait PendingRequest: Send {
     fn client_address(&self) -> io::Result<IpAddr>;
 
     /// Get the authorization info if some
-    fn auth_info(&self) -> io::Result<Option<authentication::Source>> {
+    fn auth_info(&self) -> io::Result<Option<authentication::Source<'_>>> {
         let header = match self
             .request()
             .headers
