@@ -1,11 +1,3 @@
 [workspace]
 resolver = "2"
-members = [
-    "endpoint",
-    "lib",
-    "macros",
-    "tools",
-]
-
-[profile.release]
-debug = true
+members = ["endpoint", "lib", "macros", "tools"]
