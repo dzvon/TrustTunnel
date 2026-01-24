@@ -284,6 +284,7 @@ Configure which protocols the endpoint accepts. At least one protocol must be en
 | `initial_max_streams_uni` | Integer | `4096` | Maximum unidirectional streams |
 | `max_connection_window` | Integer | `25165824` | Maximum connection window (24 MB) |
 | `max_stream_window` | Integer | `16777216` | Maximum stream window (16 MB) |
+| `congestion_control` | String | `cubic` | QUIC congestion control algorithm (`cubic`, `reno`, `bbr2`, `bbr2_gcongestion`) |
 | `disable_active_migration` | Boolean | `true` | Disable active connection migration |
 | `enable_early_data` | Boolean | `true` | Enable 0-RTT early data |
 | `message_queue_capacity` | Integer | `4096` | QUIC multiplexer queue capacity |

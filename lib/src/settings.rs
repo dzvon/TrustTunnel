@@ -371,6 +371,34 @@ pub struct Http2Settings {
     pub(crate) header_table_size: u32,
 }
 
+/// The QUIC congestion control algorithm.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[cfg_attr(feature = "rt_doc", derive(RuntimeDoc))]
+#[serde(rename_all = "snake_case")]
+pub enum QuicCongestionControl {
+    Cubic,
+    Reno,
+    Bbr2,
+    Bbr2Gcongestion,
+}
+
+impl QuicCongestionControl {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cubic => "cubic",
+            Self::Reno => "reno",
+            Self::Bbr2 => "bbr2",
+            Self::Bbr2Gcongestion => "bbr2_gcongestion",
+        }
+    }
+}
+
+impl Default for QuicCongestionControl {
+    fn default() -> Self {
+        Self::Cubic
+    }
+}
+
 /// The set of QUIC listener codec settings
 #[derive(Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "rt_doc", derive(Getter, RuntimeDoc))]
@@ -408,6 +436,9 @@ pub struct QuicSettings {
     /// The maximum size of the stream window
     #[serde(default = "QuicSettings::default_max_stream_window")]
     pub(crate) max_stream_window: u64,
+    /// The congestion control algorithm used by QUIC.
+    #[serde(default = "QuicSettings::default_congestion_control")]
+    pub(crate) congestion_control: QuicCongestionControl,
     /// Disable active connection migration on the address being used during the handshake
     #[serde(default = "QuicSettings::default_disable_active_migration")]
     pub(crate) disable_active_migration: bool,
@@ -688,6 +719,10 @@ impl QuicSettings {
 
     pub fn default_max_stream_window() -> u64 {
         16 * 1024 * 1024
+    }
+
+    pub fn default_congestion_control() -> QuicCongestionControl {
+        QuicCongestionControl::default()
     }
 
     pub fn default_disable_active_migration() -> bool {
@@ -1089,6 +1124,7 @@ impl QuicSettingsBuilder {
                 initial_max_streams_uni: QuicSettings::default_initial_max_streams_uni(),
                 max_connection_window: QuicSettings::default_max_connection_window(),
                 max_stream_window: QuicSettings::default_max_stream_window(),
+                congestion_control: QuicSettings::default_congestion_control(),
                 disable_active_migration: QuicSettings::default_disable_active_migration(),
                 enable_early_data: QuicSettings::default_enable_early_data(),
                 message_queue_capacity: QuicSettings::default_message_queue_capacity(),

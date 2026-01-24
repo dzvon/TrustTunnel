@@ -1222,6 +1222,13 @@ fn make_quic_config_with_domain_contexts(
     cfg.set_initial_max_streams_uni(quic_settings.initial_max_streams_uni);
     cfg.set_max_connection_window(quic_settings.max_connection_window);
     cfg.set_max_stream_window(quic_settings.max_stream_window);
+    cfg.set_cc_algorithm_name(quic_settings.congestion_control.as_str())
+        .map_err(|e| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("Failed to set QUIC congestion control: {}", e),
+            )
+        })?;
     cfg.set_disable_active_migration(quic_settings.disable_active_migration);
     if quic_settings.enable_early_data {
         cfg.enable_early_data();
