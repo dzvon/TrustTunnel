@@ -401,6 +401,8 @@ impl RawPacketStream {
             let fd = libc::socket(family, libc::SOCK_RAW, protocol);
             #[cfg(target_os = "macos")]
             let fd = libc::socket(family, libc::SOCK_DGRAM, protocol);
+            #[cfg(target_os = "freebsd")]
+            let fd = libc::socket(family, libc::SOCK_RAW, protocol);
             if fd < 0 {
                 return Err(io::Error::last_os_error());
             }
