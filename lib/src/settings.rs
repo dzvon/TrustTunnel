@@ -30,6 +30,8 @@ pub enum ValidationError {
     ListenProtocols(String),
     /// Invalid rules file
     RulesFile(String),
+    /// No credentials configured while listening on a public address
+    NoCredentialsOnPublicAddress,
 }
 
 impl Debug for ValidationError {
@@ -42,6 +44,11 @@ impl Debug for ValidationError {
             Self::ReverseProxy(x) => write!(f, "Invalid reverse proxy settings: {}", x),
             Self::ListenProtocols(x) => write!(f, "Invalid listen protocols settings: {}", x),
             Self::RulesFile(x) => write!(f, "Invalid rules file: {}", x),
+            Self::NoCredentialsOnPublicAddress => write!(
+                f,
+                "No credentials configured (credentials_file is missing) while listening on a public address. \
+                This is a security risk. Either configure credentials or use a loopback address (127.0.0.1 or ::1)"
+            ),
         }
     }
 }
@@ -415,20 +422,25 @@ pub struct QuicSettings {
     pub(crate) initial_max_data: u64,
     /// The initial flow control limit for locally initiated bidirectional streams
     #[serde(default = "QuicSettings::default_initial_max_stream_data_bidi_local")]
+    #[serde(alias = "max_stream_data_bidi_local")]
     pub(crate) initial_max_stream_data_bidi_local: u64,
     /// The initial flow control limit for peer-initiated bidirectional streams
     #[serde(default = "QuicSettings::default_initial_max_stream_data_bidi_remote")]
+    #[serde(alias = "max_stream_data_bidi_remote")]
     pub(crate) initial_max_stream_data_bidi_remote: u64,
     /// The initial flow control limit for unidirectional streams
     #[serde(default = "QuicSettings::default_initial_max_stream_data_uni")]
+    #[serde(alias = "max_stream_data_uni")]
     pub(crate) initial_max_stream_data_uni: u64,
     /// The initial maximum number of bidirectional streams the endpoint that receives this
     /// transport parameter is permitted to initiate
     #[serde(default = "QuicSettings::default_initial_max_streams_bidi")]
+    #[serde(alias = "max_streams_bidi")]
     pub(crate) initial_max_streams_bidi: u64,
     /// The initial maximum number of unidirectional streams the endpoint that receives this
     /// transport parameter is permitted to initiate
     #[serde(default = "QuicSettings::default_initial_max_streams_uni")]
+    #[serde(alias = "max_streams_uni")]
     pub(crate) initial_max_streams_uni: u64,
     /// The maximum size of the connection window
     #[serde(default = "QuicSettings::default_max_connection_window")]
@@ -509,6 +521,11 @@ impl Settings {
             && self.listen_protocols.quic.is_none()
         {
             return Err(ValidationError::ListenProtocols("Not set".into()));
+        }
+
+        // Do not start the endpoint without credentials on a public address
+        if self.clients.is_empty() && !self.listen_address.ip().is_loopback() {
+            return Err(ValidationError::NoCredentialsOnPublicAddress);
         }
 
         Ok(())

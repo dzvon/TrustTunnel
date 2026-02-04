@@ -165,6 +165,14 @@ fn main() {
     )
     .expect("Couldn't parse the settings file");
 
+    if settings.get_clients().is_empty() && settings.get_listen_address().ip().is_loopback() {
+        warn!(
+            "No credentials configured (credentials_file is missing). \
+            Anyone can connect to this endpoint. This is acceptable for local development \
+            but should not be used in production."
+        );
+    }
+
     let tls_hosts_settings_path = args
         .get_one::<String>(TLS_HOSTS_SETTINGS_PARAM_NAME)
         .unwrap();

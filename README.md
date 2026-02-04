@@ -378,4 +378,4 @@ Stay tuned for this feature in upcoming releases.
 
 ## License
 
-This project is licensed under the Apache 2.0 License. See [LICENSE.md](LICENSE.md) for details.
+This project is licensed under the Apache 2.0 License. See [LICENSE](LICENSE) for details.

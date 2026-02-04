@@ -4,6 +4,7 @@ use crate::user_interaction::{
 use crate::Mode;
 use std::fs;
 use toml_edit::{ArrayOfTables, Item, Key, Table};
+use trusttunnel::authentication::registry_based::Client;
 use trusttunnel::settings::{
     Http1Settings, Http2Settings, ListenProtocolSettings, QuicSettings, Settings,
 };
@@ -35,6 +36,9 @@ pub fn build() -> Built {
         )
         .unwrap();
 
+    // Collect credentials first, then build settings
+    let (credentials_path, clients) = build_credentials();
+
     Built {
         settings: builder
             .listen_protocols(ListenProtocolSettings {
@@ -42,37 +46,61 @@ pub fn build() -> Built {
                 http2: Some(Http2Settings::builder().build()),
                 quic: Some(QuicSettings::builder().build()),
             })
+            .clients(clients)
             .build()
             .expect("Couldn't build the library settings"),
-        credentials_path: build_authenticator(),
+        credentials_path,
         rules_path: build_rules(),
     }
 }
 
-fn build_authenticator() -> String {
+fn build_credentials() -> (String, Vec<Client>) {
     if crate::get_mode() != Mode::NonInteractive
         && check_file_exists(".", DEFAULT_CREDENTIALS_PATH)
         && ask_for_agreement(&format!(
             "Reuse the existing credentials file: {DEFAULT_CREDENTIALS_PATH}?"
         ))
     {
-        DEFAULT_CREDENTIALS_PATH.into()
-    } else {
-        let path = ask_for_input::<String>(
-            "Path to the credentials file",
-            Some(DEFAULT_CREDENTIALS_PATH.into()),
-        );
-
-        if checked_overwrite(&path, "Overwrite the existing credentials file?") {
-            println!("Let's create user credentials");
-            let users = build_user_list();
-            fs::write(&path, compose_credentials_content(users.into_iter()))
-                .expect("Couldn't write the credentials into a file");
-            println!("The user credentials are written to the file: {}", path);
-        }
-
-        path
+        let clients = read_credentials_file(DEFAULT_CREDENTIALS_PATH).unwrap_or_default();
+        return (DEFAULT_CREDENTIALS_PATH.into(), clients);
     }
+
+    let path = ask_for_input::<String>(
+        "Path to the credentials file",
+        Some(DEFAULT_CREDENTIALS_PATH.into()),
+    );
+
+    let users = build_user_list();
+
+    if checked_overwrite(&path, "Overwrite the existing credentials file?") {
+        fs::write(&path, compose_credentials_content(users.iter().cloned()))
+            .expect("Couldn't write the credentials into a file");
+        println!("The user credentials are written to the file: {}", path);
+    }
+
+    let clients = users
+        .into_iter()
+        .map(|(username, password)| Client { username, password })
+        .collect();
+
+    (path, clients)
+}
+
+fn read_credentials_file(path: &str) -> Option<Vec<Client>> {
+    let content = fs::read_to_string(path).ok()?;
+    let doc: toml_edit::Document = content.parse().ok()?;
+    let tables = doc.get("client")?.as_array_of_tables()?;
+    Some(
+        tables
+            .iter()
+            .filter_map(|t| {
+                Some(Client {
+                    username: t.get("username")?.as_str()?.to_string(),
+                    password: t.get("password")?.as_str()?.to_string(),
+                })
+            })
+            .collect(),
+    )
 }
 
 fn build_rules() -> String {
