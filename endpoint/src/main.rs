@@ -19,6 +19,7 @@ const SETTINGS_PARAM_NAME: &str = "settings";
 const TLS_HOSTS_SETTINGS_PARAM_NAME: &str = "tls_hosts_settings";
 const CLIENT_CONFIG_PARAM_NAME: &str = "client_config";
 const ADDRESS_PARAM_NAME: &str = "address";
+const CUSTOM_SNI_PARAM_NAME: &str = "custom_sni";
 const SENTRY_DSN_PARAM_NAME: &str = "sentry_dsn";
 const THREADS_NUM_PARAM_NAME: &str = "threads_num";
 
@@ -112,7 +113,13 @@ fn main() {
                 .requires(CLIENT_CONFIG_PARAM_NAME)
                 .short('a')
                 .long("address")
-                .help("Endpoint address to be added to client's config.")
+                .help("Endpoint address to be added to client's config."),
+            clap::Arg::new(CUSTOM_SNI_PARAM_NAME)
+                .action(clap::ArgAction::Set)
+                .requires(CLIENT_CONFIG_PARAM_NAME)
+                .short('s')
+                .long("custom-sni")
+                .help("Custom SNI override for client connection. Must match an allowed_sni in hosts.toml.")
         ])
         .disable_version_flag(true)
         .get_matches();
@@ -198,11 +205,27 @@ fn main() {
             })
             .collect();
 
+        let custom_sni = args.get_one::<String>(CUSTOM_SNI_PARAM_NAME).cloned();
+        if let Some(ref sni) = custom_sni {
+            let is_valid = tls_hosts_settings
+                .get_main_hosts()
+                .iter()
+                .any(|host| host.hostname == *sni || host.allowed_sni.contains(sni));
+            if !is_valid {
+                eprintln!(
+                    "Error: custom SNI '{}' does not match any hostname or allowed_sni in hosts.toml",
+                    sni
+                );
+                std::process::exit(1);
+            }
+        }
+
         let client_config = client_config::build(
             username,
             addresses,
             settings.get_clients(),
             &tls_hosts_settings,
+            custom_sni,
         );
         println!("{}", client_config.compose_toml());
         return;

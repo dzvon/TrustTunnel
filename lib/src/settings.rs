@@ -571,6 +571,10 @@ impl TlsHostsSettings {
         TlsSettingsBuilder::new()
     }
 
+    pub fn get_main_hosts(&self) -> &[TlsHostInfo] {
+        &self.main_hosts
+    }
+
     pub(crate) fn is_built(&self) -> bool {
         self.built
     }

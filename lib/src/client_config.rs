@@ -10,6 +10,7 @@ pub fn build(
     addresses: Vec<SocketAddr>,
     username: &[registry_based::Client],
     hostsettings: &TlsHostsSettings,
+    custom_sni: Option<String>,
 ) -> ClientConfig {
     let user = username
         .iter()
@@ -24,6 +25,7 @@ pub fn build(
     ClientConfig {
         hostname: host.hostname.clone(),
         addresses,
+        custom_sni: custom_sni.unwrap_or_default(),
         has_ipv6: true, // Hardcoded to true, client could change this himself
         username: user.username.clone(),
         password: user.password.clone(),
@@ -41,6 +43,9 @@ pub struct ClientConfig {
     hostname: String,
     /// Endpoint addresses.
     addresses: Vec<SocketAddr>,
+    /// Custom SNI value for TLS handshake.
+    /// If set, this value is used as the TLS SNI instead of the hostname.
+    custom_sni: String,
     /// Whether IPv6 traffic can be routed through the endpoint
     has_ipv6: bool,
     /// Username for authorization
@@ -65,6 +70,7 @@ impl ClientConfig {
         doc["hostname"] = value(&self.hostname);
         let vec = toml_edit::Array::from_iter(self.addresses.iter().map(|x| x.to_string()));
         doc["addresses"] = value(vec);
+        doc["custom_sni"] = value(&self.custom_sni);
         doc["has_ipv6"] = value(self.has_ipv6);
         doc["username"] = value(&self.username);
         doc["password"] = value(&self.password);
@@ -86,6 +92,9 @@ hostname = ""
 
 {}
 addresses = []
+
+{}
+custom_sni = ""
 
 {}
 has_ipv6 = true
@@ -110,6 +119,7 @@ anti_dpi = false
 "#,
         ClientConfig::doc_hostname().to_toml_comment(),
         ClientConfig::doc_addresses().to_toml_comment(),
+        ClientConfig::doc_custom_sni().to_toml_comment(),
         ClientConfig::doc_has_ipv6().to_toml_comment(),
         ClientConfig::doc_username().to_toml_comment(),
         ClientConfig::doc_password().to_toml_comment(),
