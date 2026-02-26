@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 1.0.6
+
 Added support for X25519MLKEM768 post-quantum group.
 
 ## 1.0.5
