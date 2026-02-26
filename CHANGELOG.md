@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 1.0.5
+
 - [Feature] The `-a` flag now accepts `domain` and `domain:port` in addition to `ip` and `ip:port`.
   The exported client configuration will contain the domain name, which the client resolves via DNS at connect time.
 - [Feature] Deep-link format (`tt://`) now supports domain names in the `addresses` field.
