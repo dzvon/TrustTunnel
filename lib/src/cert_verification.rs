@@ -1,6 +1,8 @@
 use crate::utils;
-use rustls::client::ServerCertVerifier;
-use rustls::{Certificate, RootCertStore, ServerName};
+use rustls::client::danger::ServerCertVerifier;
+use rustls::client::WebPkiServerVerifier;
+use rustls::RootCertStore;
+use rustls_pki_types::ServerName;
 use std::io;
 use std::sync::Arc;
 
@@ -24,9 +26,8 @@ impl CertificateVerifier {
                 format!("failed to load system CAs: {}", e),
             )
         })?;
-
         for cert in native_certs {
-            root_store.add(&Certificate(cert.0)).map_err(|e| {
+            root_store.add(cert).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
                     format!("failed to add CA cert: {}", e),
@@ -63,7 +64,7 @@ impl CertificateVerifier {
         }
 
         // Parse hostname as ServerName
-        let server_name = match ServerName::try_from(hostname) {
+        let server_name = match ServerName::try_from(hostname.to_string()) {
             Ok(name) => name,
             Err(e) => {
                 debug!("Invalid hostname {}: {}", hostname, e);
@@ -71,22 +72,22 @@ impl CertificateVerifier {
             }
         };
 
-        // Use rustls WebPkiVerifier to check certificate
-        use rustls::client::WebPkiVerifier;
-
-        let verifier = WebPkiVerifier::new(self.root_store.clone(), None);
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let verifier =
+            match WebPkiServerVerifier::builder_with_provider(self.root_store.clone(), provider)
+                .build()
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    debug!("Failed to build verifier: {}", e);
+                    return false;
+                }
+            };
         let end_entity = &certs[0];
-        let intermediates: Vec<Certificate> = certs.iter().skip(1).cloned().collect();
-        let now = std::time::SystemTime::now();
+        let intermediates: Vec<_> = certs.iter().skip(1).cloned().collect();
+        let now = rustls_pki_types::UnixTime::now();
 
-        match verifier.verify_server_cert(
-            end_entity,
-            &intermediates,
-            &server_name,
-            &mut std::iter::empty(),
-            &[],
-            now,
-        ) {
+        match verifier.verify_server_cert(end_entity, &intermediates, &server_name, &[], now) {
             Ok(_) => {
                 debug!("Certificate chain for {} is system-verifiable", hostname);
                 true

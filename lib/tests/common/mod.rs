@@ -6,8 +6,10 @@ use log::{info, LevelFilter};
 use quiche::h3;
 use quiche::h3::NameValue;
 use ring::rand::{SecureRandom, SystemRandom};
-use rustls::client::ServerCertVerified;
-use rustls::{Certificate, ServerName};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::aws_lc_rs;
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::DigitallySignedStruct;
 use std::io::{ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::ops::Deref;
@@ -15,7 +17,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Once};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use std::{iter, slice};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UdpSocket};
@@ -70,8 +72,18 @@ pub async fn establish_tls_connection(
     peer: &SocketAddr,
     alpn: Option<&[u8]>,
 ) -> impl AsyncRead + AsyncWrite + Unpin {
-    let mut config = rustls::ClientConfig::builder()
-        .with_safe_defaults()
+    let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+    provider.kx_groups = vec![
+        aws_lc_rs::kx_group::X25519MLKEM768,
+        aws_lc_rs::kx_group::X25519,
+        aws_lc_rs::kx_group::SECP256R1,
+        aws_lc_rs::kx_group::SECP384R1,
+    ];
+
+    let mut config = rustls::ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .dangerous()
         .with_custom_certificate_verifier(Arc::new(NoopVerifier {}))
         .with_no_client_auth();
     if let Some(alpn) = alpn {
@@ -80,7 +92,7 @@ pub async fn establish_tls_connection(
 
     TlsConnector::from(Arc::new(config))
         .connect(
-            ServerName::try_from(server_name).unwrap(),
+            ServerName::try_from(server_name.to_string()).unwrap(),
             TcpStream::connect(peer).await.unwrap(),
         )
         .await
@@ -118,19 +130,43 @@ impl Drop for File {
     }
 }
 
+#[derive(Debug)]
 pub struct NoopVerifier;
 
-impl rustls::client::ServerCertVerifier for NoopVerifier {
+impl ServerCertVerifier for NoopVerifier {
     fn verify_server_cert(
         &self,
-        _: &Certificate,
-        _: &[Certificate],
-        _: &ServerName,
-        _: &mut dyn Iterator<Item = &[u8]>,
+        _: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: &ServerName<'_>,
         _: &[u8],
-        _: SystemTime,
+        _: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
         Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::aws_lc_rs::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 

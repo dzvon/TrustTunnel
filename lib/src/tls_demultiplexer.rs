@@ -4,7 +4,7 @@ use crate::{net_utils, settings, utils};
 use boring::pkey::{PKey, Private};
 use boring::rsa::Rsa;
 use boring::x509::X509;
-use rustls::{Certificate, PrivateKey};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
@@ -27,8 +27,8 @@ pub(crate) struct BoringIdentity {
 }
 
 struct Host {
-    cert_chain: Vec<Certificate>,
-    key: PrivateKey,
+    cert_chain: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
     /// Quiche only accepts paths
     cert_chain_path: String,
     /// Quiche only accepts paths
@@ -39,7 +39,6 @@ struct Host {
     boring: BoringIdentity,
 }
 
-#[derive(Clone)]
 pub(crate) struct ConnectionMeta {
     /// The server name a client sent in the client hello
     pub sni: String,
@@ -48,9 +47,9 @@ pub(crate) struct ConnectionMeta {
     /// The channel selected by the demultiplexer
     pub channel: Channel,
     /// The certificate chain of the TLS server on the connection
-    pub cert_chain: Vec<Certificate>,
+    pub cert_chain: Vec<CertificateDer<'static>>,
     /// The private key of the TLS server on the connection
-    pub key: PrivateKey,
+    pub key: PrivateKeyDer<'static>,
     /// Quiche only accepts paths
     pub cert_chain_path: String,
     /// Quiche only accepts paths
@@ -59,6 +58,22 @@ pub(crate) struct ConnectionMeta {
     pub sni_auth_creds: Option<String>,
     /// Pre-parsed certificates and private key for boring SSL (performance optimization)
     pub boring: BoringIdentity,
+}
+
+impl Clone for ConnectionMeta {
+    fn clone(&self) -> Self {
+        Self {
+            sni: self.sni.clone(),
+            protocol: self.protocol,
+            channel: self.channel,
+            cert_chain: self.cert_chain.clone(),
+            key: self.key.clone_key(),
+            cert_chain_path: self.cert_chain_path.clone(),
+            key_path: self.key_path.clone(),
+            sni_auth_creds: self.sni_auth_creds.clone(),
+            boring: self.boring.clone(),
+        }
+    }
 }
 
 impl Debug for ConnectionMeta {
@@ -133,7 +148,7 @@ impl TlsDemux {
             };
 
             let key = if cfg!(test) {
-                PrivateKey(Default::default())
+                PrivateKeyDer::Pkcs8(rustls_pki_types::PrivatePkcs8KeyDer::from(vec![]))
             } else {
                 utils::load_private_key(&x.private_key_path)?
             };
@@ -149,12 +164,12 @@ impl TlsDemux {
             } else {
                 let mut chain = Vec::with_capacity(cert_chain.len());
                 for c in &cert_chain {
-                    chain.push(X509::from_der(&c.0).map_err(|e| {
+                    chain.push(X509::from_der(c.as_ref()).map_err(|e| {
                         io::Error::new(io::ErrorKind::Other, format!("X509 parse error: {e}"))
                     })?);
                 }
 
-                let key_bytes = &key.0;
+                let key_bytes = key.secret_der();
                 let boring_key: PKey<Private> = PKey::private_key_from_der(key_bytes)
                     .or_else(|_| PKey::private_key_from_pkcs8(key_bytes))
                     .or_else(|_| PKey::private_key_from_pem(key_bytes))
@@ -234,7 +249,7 @@ impl TlsDemux {
             protocol: Protocol::Http3,
             channel: Channel::Tunnel,
             cert_chain: Default::default(), // quiche only accepts paths
-            key: PrivateKey(Default::default()), // quiche only accepts paths
+            key: PrivateKeyDer::Pkcs8(rustls_pki_types::PrivatePkcs8KeyDer::from(vec![])), // quiche only accepts paths
             cert_chain_path: host.cert_chain_path.clone(),
             key_path: host.key_path.clone(),
             sni_auth_creds: None,
@@ -333,7 +348,7 @@ impl TlsDemux {
             protocol,
             channel,
             cert_chain: host.cert_chain.clone(),
-            key: host.key.clone(),
+            key: host.key.clone_key(),
             cert_chain_path: host.cert_chain_path.clone(),
             key_path: host.key_path.clone(),
             sni_auth_creds: auth,

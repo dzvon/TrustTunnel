@@ -1,5 +1,7 @@
 # CHANGELOG
 
+Added support for X25519MLKEM768 post-quantum group.
+
 ## 1.0.5
 
 - [Feature] The `-a` flag now accepts `domain` and `domain:port` in addition to `ip` and `ip:port`.

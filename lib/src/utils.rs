@@ -1,4 +1,3 @@
-use rustls::{Certificate, PrivateKey};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
@@ -71,7 +70,7 @@ impl<L, R> Either<L, R> {
     }
 }
 
-pub fn load_certs(filename: &str) -> io::Result<Vec<Certificate>> {
+pub fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(File::open(filename)?);
     let mut pem_data = String::new();
     reader.read_to_string(&mut pem_data).map_err(|e| {
@@ -84,15 +83,10 @@ pub fn load_certs(filename: &str) -> io::Result<Vec<Certificate>> {
     CertificateDer::pem_slice_iter(pem_data.as_bytes())
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| io::Error::new(ErrorKind::InvalidInput, format!("Invalid cert: {}", e)))
-        .map(|certs| {
-            certs
-                .into_iter()
-                .map(|c| Certificate(c.into_owned().to_vec()))
-                .collect()
-        })
+        .map(|certs| certs.into_iter().map(|c| c.into_owned()).collect())
 }
 
-pub fn load_private_key(filename: &str) -> io::Result<PrivateKey> {
+pub fn load_private_key(filename: &str) -> io::Result<PrivateKeyDer<'static>> {
     let mut reader = BufReader::new(File::open(filename)?);
     let mut pem_data = String::new();
     reader.read_to_string(&mut pem_data).map_err(|e| {
@@ -104,7 +98,7 @@ pub fn load_private_key(filename: &str) -> io::Result<PrivateKey> {
 
     PrivateKeyDer::from_pem_slice(pem_data.as_bytes())
         .map_err(|e| io::Error::new(ErrorKind::InvalidInput, format!("Invalid key: {}", e)))
-        .map(|key| PrivateKey(key.secret_der().to_vec()))
+        .map(|key| key.clone_key())
 }
 
 pub trait IterJoin {

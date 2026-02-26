@@ -1,5 +1,7 @@
 use crate::{log_utils, net_utils, tls_demultiplexer};
-use rustls::{Certificate, PrivateKey, ServerConfig};
+use rustls::crypto::aws_lc_rs;
+use rustls::ServerConfig;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::io;
 use std::io::ErrorKind;
 use std::pin::Pin;
@@ -194,13 +196,21 @@ impl TlsAcceptor {
     pub async fn accept(
         self,
         protocol: tls_demultiplexer::Protocol,
-        cert_chain: Vec<Certificate>,
-        key: PrivateKey,
+        cert_chain: Vec<CertificateDer<'static>>,
+        key: PrivateKeyDer<'static>,
         _log_id: &log_utils::IdChain<u64>,
     ) -> io::Result<TlsStream<PrebufferedTcpStream>> {
         let tls_config = {
-            let mut cfg = ServerConfig::builder()
-                .with_safe_defaults()
+            let mut provider = aws_lc_rs::default_provider();
+            provider.kx_groups = vec![
+                aws_lc_rs::kx_group::X25519MLKEM768,
+                aws_lc_rs::kx_group::X25519,
+                aws_lc_rs::kx_group::SECP256R1,
+                aws_lc_rs::kx_group::SECP384R1,
+            ];
+            let mut cfg = ServerConfig::builder_with_provider(Arc::new(provider))
+                .with_safe_default_protocol_versions()
+                .map_err(|e| io::Error::new(ErrorKind::Other, format!("TLS config error: {}", e)))?
                 .with_no_client_auth()
                 .with_single_cert(cert_chain, key)
                 .map_err(|e| {
