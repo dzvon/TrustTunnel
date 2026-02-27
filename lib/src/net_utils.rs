@@ -166,16 +166,6 @@ pub(crate) fn bind_to_interface(
     }
 }
 
-#[cfg(target_os = "freebsd")]
-pub(crate) fn bind_to_interface(
-    _fd: libc::c_int,
-    _family: libc::c_int,
-    _name: &str,
-) -> io::Result<()> {
-    // FreeBSD does not provide a portable bind-to-interface by name option here.
-    Ok(())
-}
-
 pub(crate) fn set_socket_ttl(fd: libc::c_int, is_ipv4: bool, ttl: u8) -> io::Result<()> {
     unsafe {
         let (level, name) = if is_ipv4 {
