@@ -200,7 +200,7 @@ fn parse_cert(cert: Either<&str, (&str, &str)>) -> Option<Cert> {
         },
     )?;
 
-    let cert = x509_parser::parse_x509_certificate(chain.first()?.0.as_slice())
+    let cert = x509_parser::parse_x509_certificate(chain.first()?.as_ref())
         .ok()?
         .1;
     Some(Cert {

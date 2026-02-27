@@ -64,6 +64,10 @@ struct StreamSink {
     /// (see [`StreamSink::wait_writable()`]) to avoid busy loops.
     data_frame_overhead: usize,
     id: log_utils::IdChain<u64>,
+    /// Unsent response headers stored when `send_response()` encounters
+    /// `StreamBlocked`. Consumed on the first `wait_writable()` cycle.
+    /// The second boolean parameter represents EOF.
+    pending_response: Option<(ResponseHeaders, bool)>,
 }
 
 impl Http3Codec {
@@ -186,6 +190,7 @@ impl Http3Codec {
                 codec_tx: self.codec_tx.clone(),
                 data_frame_overhead: net_utils::MIN_USABLE_QUIC_STREAM_CAPACITY,
                 id,
+                pending_response: None,
             },
         }))
     }
@@ -215,6 +220,7 @@ impl Http3Codec {
                 .ok_or_else(|| io::Error::from(ErrorKind::NotFound))
                 .and_then(|s| Ok((self.socket.stream_capacity(stream_id)?, s)))
             {
+                // Guard against capacity race between listen() and notification delivery.
                 Ok((cap, _)) if cap < net_utils::MIN_USABLE_QUIC_STREAM_CAPACITY => {
                     self.socket.notify_stream_waiting_writable(stream_id);
                     Ok(())
@@ -394,13 +400,78 @@ impl Drop for StreamSource {
     }
 }
 
+impl StreamSink {
+    fn try_send_pending_response(&mut self) -> io::Result<()> {
+        if let Some((ref response, eof)) = self.pending_response {
+            match self.socket.send_response(self.stream_id, response, false) {
+                Ok(()) => {
+                    self.pending_response = None;
+                    if eof {
+                        self.codec_tx
+                            .send(StreamMessage::Shutdown(self.stream_id, None))
+                            .map_err(|e| {
+                                io::Error::new(
+                                    ErrorKind::Other,
+                                    format!("Failed to send shutdown message: {}", e),
+                                )
+                            })?;
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    log_id!(
+                        debug,
+                        self.id,
+                        "Response headers deferred due to StreamBlocked"
+                    );
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    async fn consume_pending_response(&mut self) -> io::Result<()> {
+        while self.pending_response.is_some() {
+            self.try_send_pending_response()?;
+            if self.pending_response.is_some() {
+                self.codec_tx
+                    .send(StreamMessage::WaitingWritable(self.stream_id))
+                    .map_err(|_| io::Error::from(ErrorKind::UnexpectedEof))?;
+                match self.writable_event_rx.recv().await {
+                    None => return Err(io::Error::from(ErrorKind::UnexpectedEof)),
+                    Some(_) => continue,
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn wait_body_capacity(&mut self) -> io::Result<()> {
+        loop {
+            match self.socket.stream_capacity(self.stream_id) {
+                Ok(n) if n > self.data_frame_overhead => return Ok(()),
+                Ok(_) => {
+                    self.codec_tx
+                        .send(StreamMessage::WaitingWritable(self.stream_id))
+                        .map_err(|_| io::Error::from(ErrorKind::UnexpectedEof))?;
+                    match self.writable_event_rx.recv().await {
+                        None => return Err(io::Error::from(ErrorKind::UnexpectedEof)),
+                        Some(_) => continue,
+                    }
+                }
+                Err(e) => return Err(io::Error::new(ErrorKind::Other, e.to_string())),
+            }
+        }
+    }
+}
+
 impl http_codec::PendingRespond for StreamSink {
     fn id(&self) -> log_utils::IdChain<u64> {
         self.id.clone()
     }
 
     fn send_response(
-        self: Box<Self>,
+        mut self: Box<Self>,
         response: ResponseHeaders,
         eof: bool,
     ) -> io::Result<Box<dyn http_codec::RespondedStreamSink>> {
@@ -412,18 +483,8 @@ impl http_codec::PendingRespond for StreamSink {
             eof
         );
 
-        self.socket.send_response(self.stream_id, response, false)?;
-
-        if eof {
-            self.codec_tx
-                .send(StreamMessage::Shutdown(self.stream_id, None))
-                .map_err(|e| {
-                    io::Error::new(
-                        ErrorKind::Other,
-                        format!("Failed to send shutdown message: {}", e),
-                    )
-                })?;
-        }
+        self.pending_response = Some((response, eof));
+        self.try_send_pending_response()?;
 
         Ok(self)
     }
@@ -446,6 +507,16 @@ impl pipe::Sink for StreamSink {
     }
 
     fn write(&mut self, data: Bytes) -> io::Result<Bytes> {
+        self.try_send_pending_response()?;
+        if self.pending_response.is_some() {
+            log_id!(
+                debug,
+                self.id,
+                "Body write deferred: response headers not yet sent"
+            );
+            return Ok(data);
+        }
+
         let orig_len = data.len();
         let data = self.socket.write(self.stream_id, data)?;
 
@@ -470,21 +541,8 @@ impl pipe::Sink for StreamSink {
     }
 
     async fn wait_writable(&mut self) -> io::Result<()> {
-        loop {
-            match self.socket.stream_capacity(self.stream_id) {
-                Ok(n) if n > self.data_frame_overhead => return Ok(()),
-                Ok(_) => {
-                    self.codec_tx
-                        .send(StreamMessage::WaitingWritable(self.stream_id))
-                        .map_err(|_| io::Error::from(ErrorKind::UnexpectedEof))?;
-                    match self.writable_event_rx.recv().await {
-                        None => return Err(io::Error::from(ErrorKind::UnexpectedEof)),
-                        Some(_) => continue,
-                    }
-                }
-                Err(e) => return Err(io::Error::new(ErrorKind::Other, e.to_string())),
-            }
-        }
+        self.consume_pending_response().await?;
+        self.wait_body_capacity().await
     }
 }
 
@@ -497,13 +555,11 @@ impl http_codec::DroppingSink for StreamSink {
         }
 
         let unsent = self.socket.write(self.stream_id, data)?;
-        if !unsent.is_empty() {
-            return Err(io::Error::new(
-                ErrorKind::Other,
-                "Packet was sent partially while should've been sent entirely",
-            ));
+        if unsent.is_empty() {
+            Ok(datagram_pipe::SendStatus::Sent)
+        } else {
+            Ok(datagram_pipe::SendStatus::Dropped)
         }
-        Ok(datagram_pipe::SendStatus::Sent)
     }
 }
 

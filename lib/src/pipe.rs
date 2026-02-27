@@ -66,7 +66,7 @@ pub(crate) trait Sink: Send {
     fn eof(&mut self) -> io::Result<()>;
 
     /// Wait for the connection to be writable. Should be called if [`Self::write()`] return non-empty
-    /// buffer.
+    /// buffer. Could send pending headers as part of achieving the "writable" condition.
     async fn wait_writable(&mut self) -> io::Result<()>;
 
     /// Flush all intermediately buffered contents.

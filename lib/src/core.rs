@@ -1,3 +1,4 @@
+use crate::connection_limiter::ConnectionLimiter;
 use crate::direct_forwarder::DirectForwarder;
 use crate::forwarder::Forwarder;
 use crate::http1_codec::Http1Codec;
@@ -19,7 +20,7 @@ use crate::{
     authentication, http_ping_handler, http_speedtest_handler, log_id, log_utils, metrics,
     net_utils, reverse_proxy, rules, settings, tls_demultiplexer, tunnel,
 };
-use socket2::SockRef;
+use socket2::{Domain, Protocol as SockProtocol, SockRef, Socket, Type};
 use std::io;
 use std::io::ErrorKind;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -81,6 +82,7 @@ pub(crate) struct Context {
     pub metrics: Arc<Metrics>,
     next_client_id: Arc<AtomicU64>,
     next_tunnel_id: Arc<AtomicU64>,
+    pub connection_limiter: Option<Arc<ConnectionLimiter>>,
 }
 
 impl Context {
@@ -116,6 +118,22 @@ impl Core {
 
         let (fatal_error, _fatal_error_rx) = watch::channel(None);
 
+        let connection_limiter = if settings.default_max_http2_conns_per_client.is_some()
+            || settings.default_max_http3_conns_per_client.is_some()
+            || settings
+                .clients
+                .iter()
+                .any(|c| c.max_http2_conns.is_some() || c.max_http3_conns.is_some())
+        {
+            Some(Arc::new(ConnectionLimiter::new(
+                &settings.clients,
+                settings.default_max_http2_conns_per_client,
+                settings.default_max_http3_conns_per_client,
+            )))
+        } else {
+            None
+        };
+
         Ok(Self {
             context: Arc::new(Context {
                 settings: settings.clone(),
@@ -134,6 +152,7 @@ impl Core {
                 metrics: Metrics::new().map_err(|e| Error::Metrics(e.to_string()))?,
                 next_client_id: Default::default(),
                 next_tunnel_id: Default::default(),
+                connection_limiter,
             }),
         })
     }
@@ -221,7 +240,23 @@ impl Core {
         let has_tcp_based_codec =
             settings.listen_protocols.http1.is_some() || settings.listen_protocols.http2.is_some();
 
-        let tcp_listener = TcpListener::bind(settings.listen_address).await?;
+        let tcp_listener = {
+            let addr = settings.listen_address;
+            let domain = if addr.is_ipv6() {
+                Domain::IPV6
+            } else {
+                Domain::IPV4
+            };
+            let socket = Socket::new(domain, Type::STREAM, Some(SockProtocol::TCP))?;
+            if domain == Domain::IPV6 {
+                socket.set_only_v6(false)?;
+            }
+            socket.set_reuse_address(true)?;
+            socket.set_nonblocking(true)?;
+            socket.bind(&addr.into())?;
+            socket.listen(1024)?;
+            TcpListener::from_std(socket.into())?
+        };
         info!("Listening to TCP {}", settings.listen_address);
 
         let tls_listener = Arc::new(TlsListener::new());
@@ -272,7 +307,7 @@ impl Core {
                             if let Err((client_id, message)) = Core::on_new_tls_connection(
                                 context.clone(),
                                 acceptor,
-                                client_addr.ip(),
+                                net_utils::unmap_ipv6(client_addr.ip()),
                                 client_id,
                             )
                             .await
@@ -293,7 +328,21 @@ impl Core {
             return Ok(());
         }
 
-        let socket = UdpSocket::bind(settings.listen_address).await?;
+        let socket = {
+            let addr = settings.listen_address;
+            let domain = if addr.is_ipv6() {
+                Domain::IPV6
+            } else {
+                Domain::IPV4
+            };
+            let socket = Socket::new(domain, Type::DGRAM, Some(SockProtocol::UDP))?;
+            if domain == Domain::IPV6 {
+                socket.set_only_v6(false)?;
+            }
+            socket.set_nonblocking(true)?;
+            socket.bind(&addr.into())?;
+            UdpSocket::from_std(socket.into())?
+        };
         info!("Listening to UDP {}", settings.listen_address);
 
         let mut quic_listener = QuicMultiplexer::new(
@@ -524,7 +573,10 @@ impl Core {
         client_id: log_utils::IdChain<u64>,
     ) {
         // Apply connection filtering rules
-        let client_ip = socket.peer_addr().ok().map(|addr| addr.ip());
+        let client_ip = socket
+            .peer_addr()
+            .ok()
+            .map(|addr| net_utils::unmap_ipv6(addr.ip()));
         let client_random = Some(socket.client_random());
 
         if let Err(deny_reason) = Self::evaluate_connection_rules(
@@ -642,21 +694,37 @@ impl Core {
     ) {
         let _metrics_guard = Metrics::client_sessions_counter(context.metrics.clone(), protocol);
 
-        let authentication_policy = match context.authenticator.as_ref().zip(sni_auth_creds) {
-            None => tunnel::AuthenticationPolicy::Default,
-            Some((authenticator, credentials)) => {
-                let auth = authentication::Source::Sni(credentials.into());
-                match authenticator.authenticate(&auth, &tunnel_id) {
-                    authentication::Status::Pass => {
-                        tunnel::AuthenticationPolicy::Authenticated(auth)
-                    }
-                    authentication::Status::Reject => {
-                        log_id!(debug, tunnel_id, "SNI authentication failed");
-                        return;
+        let (authentication_policy, sni_connection_guard) =
+            match context.authenticator.as_ref().zip(sni_auth_creds) {
+                None => (tunnel::AuthenticationPolicy::Default, None),
+                Some((authenticator, credentials)) => {
+                    let auth = authentication::Source::Sni(credentials.into());
+                    match authenticator.authenticate(&auth, &tunnel_id) {
+                        authentication::Status::Pass => {
+                            let guard = context.connection_limiter.as_ref().and_then(|limiter| {
+                                let creds = match &auth {
+                                    authentication::Source::Sni(s) => s.as_ref(),
+                                    authentication::Source::ProxyBasic(s) => s.as_ref(),
+                                };
+                                limiter.try_acquire(creds, protocol)
+                            });
+                            if context.connection_limiter.is_some() && guard.is_none() {
+                                log_id!(
+                                    debug,
+                                    tunnel_id,
+                                    "Connection limit exceeded for SNI-authenticated client"
+                                );
+                                return;
+                            }
+                            (tunnel::AuthenticationPolicy::Authenticated(auth), guard)
+                        }
+                        authentication::Status::Reject => {
+                            log_id!(debug, tunnel_id, "SNI authentication failed");
+                            return;
+                        }
                     }
                 }
-            }
-        };
+            };
 
         log_id!(debug, tunnel_id, "New tunnel for client");
         let mut tunnel = Tunnel::new(
@@ -664,6 +732,7 @@ impl Core {
             Box::new(HttpDownstream::new(context.clone(), codec, server_name)),
             Self::make_forwarder(context),
             authentication_policy,
+            sni_connection_guard,
             tunnel_id.clone(),
         );
 
@@ -719,6 +788,7 @@ impl Default for Context {
             metrics: Metrics::new().unwrap(),
             next_client_id: Default::default(),
             next_tunnel_id: Default::default(),
+            connection_limiter: None,
         }
     }
 }

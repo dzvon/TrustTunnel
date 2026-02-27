@@ -763,7 +763,7 @@ impl QuicSocket {
     pub fn send_response(
         &self,
         stream_id: u64,
-        response: ResponseHeaders,
+        response: &ResponseHeaders,
         fin: bool,
     ) -> io::Result<()> {
         let response: Vec<_> = std::iter::once(h3::HeaderRef::new(
@@ -787,7 +787,14 @@ impl QuicSocket {
                 response.as_slice(),
                 fin,
             )
-            .map_err(|e| io::Error::new(ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| {
+                let kind = if matches!(e, h3::Error::StreamBlocked) {
+                    ErrorKind::WouldBlock
+                } else {
+                    ErrorKind::Other
+                };
+                io::Error::new(kind, e.to_string())
+            })?;
 
         self.flush_pending_data()
     }
@@ -833,7 +840,7 @@ impl QuicSocket {
             false,
         ) {
             Ok(n) => data.advance(n),
-            Err(h3::Error::Done) => (),
+            Err(h3::Error::Done | h3::Error::StreamBlocked) => (),
             Err(e) => return Err(io::Error::new(ErrorKind::Other, e.to_string())),
         }
 
@@ -906,6 +913,7 @@ impl QuicSocket {
                         let writable_streams: Vec<_> = {
                             let quic_conn = self.quic_conn.lock().unwrap();
                             let mut waiting_streams = self.waiting_writable_streams.lock().unwrap();
+                            // Avoid emitting Writable events for streams with negligible capacity.
                             let writable_streams: Vec<_> = waiting_streams
                                 .iter()
                                 .filter(|id| {
@@ -978,16 +986,13 @@ impl QuicSocket {
                 match self.on_request(stream_id, list) {
                     Ok(x) => Ok(Some(x)),
                     Err(e) => {
-                        let _ = self.send_response(
-                            stream_id,
-                            http::Response::builder()
-                                .status(http::StatusCode::BAD_REQUEST)
-                                .body(())
-                                .unwrap()
-                                .into_parts()
-                                .0,
-                            true,
-                        );
+                        let response = http::Response::builder()
+                            .status(http::StatusCode::BAD_REQUEST)
+                            .body(())
+                            .unwrap()
+                            .into_parts()
+                            .0;
+                        let _ = self.send_response(stream_id, &response, true);
                         Err(e)
                     }
                 }

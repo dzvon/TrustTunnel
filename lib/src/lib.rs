@@ -4,6 +4,7 @@ extern crate log;
 extern crate macros;
 
 pub mod authentication;
+pub mod cert_verification;
 pub mod client_config;
 pub mod core;
 pub mod log_utils;
@@ -13,6 +14,7 @@ pub mod settings;
 pub mod shutdown;
 pub mod utils;
 
+mod connection_limiter;
 mod datagram_pipe;
 mod direct_forwarder;
 mod downstream;

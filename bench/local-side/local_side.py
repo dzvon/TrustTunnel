@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from argparse import ArgumentParser
 from datetime import datetime
@@ -93,21 +94,29 @@ def run_file_download_test(url, parallel_files, proto, proxy_url):
     elif proto == "http3":
         args.append("--http3-only")
     processes = []
+    output_files = []
     print(f"{datetime.now().time()} | Running command '{args}' in parallel {parallel_files}...")
-    for _ in range(0, parallel_files):
-        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    for i in range(0, parallel_files):
+        f = tempfile.NamedTemporaryFile(
+            mode='w+', prefix=f'curl-dl-{i}-', suffix='.log', delete=False)
+        proc = subprocess.Popen(args, stdout=f, stderr=subprocess.STDOUT)
         processes.append(proc)
+        output_files.append(f)
 
     speeds_MBps = []
     errors = []
-    for p in processes:
-        if p.wait() != 0:
-            message = p.stdout.read().decode("utf-8")
-            print(f"{datetime.now().time()} | Transfer failed:\n{message}")
-            errors.append(message)
+    for i, p in enumerate(processes):
+        p.wait()
+
+        output_files[i].close()
+        with open(output_files[i].name, 'r') as log:
+            output = log.read()
+
+        if p.returncode != 0:
+            print(f"{datetime.now().time()} | Transfer failed:\n{output}")
+            errors.append(output)
             continue
 
-        output = p.stdout.read().decode("utf-8")
         speed_str = output.splitlines()[-1].split()[6]
         if 'k' in speed_str:
             speeds_MBps.append(float(speed_str.replace('k', '')) / 1024)
@@ -117,6 +126,12 @@ def run_file_download_test(url, parallel_files, proto, proxy_url):
             speeds_MBps.append(1024 * float(speed_str.replace('G', '')))
         else:
             speeds_MBps.append(float(speed_str) / (1024 * 1024))
+
+    for f in output_files:
+        try:
+            os.unlink(f.name)
+        except OSError:
+            pass
 
     print(f"{datetime.now().time()} | File download test is done")
     return HttpMeasurements(
@@ -137,23 +152,31 @@ def run_file_upload_test(url, parallel_files, proto, proxy_url):
     if proxy_url is not None:
         args.extend(["--proxy-insecure", "--proxy", proxy_url])
     processes = []
+    output_files = []
     print(f"{datetime.now().time()} | Running command '{args}' in parallel {parallel_files}...")
-    for _ in range(0, parallel_files):
+    for i in range(0, parallel_files):
+        f = tempfile.NamedTemporaryFile(
+            mode='w+', prefix=f'curl-ul-{i}-', suffix='.log', delete=False)
         proc = subprocess.Popen(
             args + [f"{url}/{os.environ['UPLOAD_FILENAME']}"],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            stdout=f, stderr=subprocess.STDOUT)
         processes.append(proc)
+        output_files.append(f)
 
     speeds_MBps = []
     errors = []
-    for p in processes:
-        if p.wait() != 0:
-            message = p.stdout.read().decode("utf-8")
-            print(f"{datetime.now().time()} | Transfer failed:\n{message}")
-            errors.append(message)
+    for i, p in enumerate(processes):
+        p.wait()
+
+        output_files[i].close()
+        with open(output_files[i].name, 'r') as log:
+            output = log.read()
+
+        if p.returncode != 0:
+            print(f"{datetime.now().time()} | Transfer failed:\n{output}")
+            errors.append(output)
             continue
 
-        output = p.stdout.read().decode("utf-8")
         speed_str = output.splitlines()[-1].split()[7]
         if 'k' in speed_str:
             speeds_MBps.append(float(speed_str.replace('k', '')) / 1024)
@@ -163,6 +186,12 @@ def run_file_upload_test(url, parallel_files, proto, proxy_url):
             speeds_MBps.append(1024 * float(speed_str.replace('G', '')))
         else:
             speeds_MBps.append(float(speed_str) / (1024 * 1024))
+
+    for f in output_files:
+        try:
+            os.unlink(f.name)
+        except OSError:
+            pass
 
     print(f"{datetime.now().time()} | File upload test is done")
     return HttpMeasurements(

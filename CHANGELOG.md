@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## 1.0.7
+
+- [Feature] Added per-client connection limits
+    - Optional limits for simultaneous HTTP/2 and HTTP/3 connections per client credentials
+    - Global default limits via `default_max_http2_conns_per_client` and `default_max_http3_conns_per_client` in main config
+    - Per-client overrides via `max_http2_conns` and `max_http3_conns` in credentials file
+    - Applies to both SNI-authenticated and proxy-basic authenticated connections
+    - For proxy-basic: limit enforced on first authenticated request (not idle connections)
+
+  API changes in the library:
+    - Added `max_http2_conns` and `max_http3_conns` fields to `authentication::registry_based::Client`
+    - Added `default_max_http2_conns_per_client` and `default_max_http3_conns_per_client` fields to `settings::Settings`
+    - Added new `connection_limiter` module with `ConnectionLimiter` and `ConnectionGuard` types
+    - Added `connection_limiter` field to `core::Context`
+
+## 1.0.6
+
+Added support for X25519MLKEM768 post-quantum group.
+
+## 1.0.5
+
+- [Feature] The `-a` flag now accepts `domain` and `domain:port` in addition to `ip` and `ip:port`.
+  The exported client configuration will contain the domain name, which the client resolves via DNS at connect time.
+- [Feature] Deep-link format (`tt://`) now supports domain names in the `addresses` field.
+- [Feature] When listening on `[::]`, the endpoint now explicitly sets `IPV6_V6ONLY=false` to accept
+  both IPv4 and IPv6 connections on a single socket (dual-stack).
+
+## 1.0.1
+
+- [Feature] Added new `trusttunnel-deeplink` library crate for encoding/decoding `tt://` URIs
+- [Feature] Added `client_random_prefix` field to client configuration export
+    - New CLI option `--client-random-prefix`
+    - Validates hex format and checks against `rules.toml`
+    - Added to deep-link format as tag 0x0B
+
+## 0.9.127
+
+- [Feature] Added GPG signing of the endpoint binaries.
+
 ## 0.9.122
 
 - Endpoint now requires credentials when listening on a public address.

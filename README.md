@@ -246,28 +246,45 @@ sudo systemctl enable --now trusttunnel
 
 #### Export client configuration
 
-The endpoint binary is capable of generating the client configuration for
-a particular user.
+The endpoint binary can generate client configurations in two formats:
 
-This configuration contains all necessary information that is required to
-connect to the endpoint.
+##### Deep-Link Format (Default)
 
-To generate the configuration, run the following command:
+Generate a compact `tt://` URI suitable for QR codes and mobile apps:
 
 ```shell
 # <client_name> - name of the client those credentials will be included in the configuration
-# <public_ip> - `ip` or `ip:port` that the user will use to connect to the endpoint
-#             If only `ip` is specified, the port from the `listen_address` field will be used
+# <address> - `ip`, `ip:port`, `domain`, or `domain:port` that the client will use to connect
+#           If only `ip` or `domain` is specified, the port from the `listen_address` field will be used
 cd /opt/trusttunnel/
-./trusttunnel_endpoint vpn.toml hosts.toml -c <client_name> -a <public_ip>
+./trusttunnel_endpoint vpn.toml hosts.toml -c <client_name> -a <address>
+
+# Or explicitly specify the format:
+./trusttunnel_endpoint vpn.toml hosts.toml -c <client_name> -a <address> --format deeplink
 ```
 
-This will print the configuration with the credentials for the client named
-`<client_name>`.
+This outputs a `tt://` deep-link URI that can be:
 
-The generated client configuration could be used to set up the
-[TrustTunnel Flutter Client][trusttunnel-flutter-client], refer to the
-documentation in [its repository][trusttunnel-flutter-configuration].
+- Shared directly with mobile clients
+- Used with the [CLI client][trusttunnel-client] or [TrustTunnel Flutter Client][trusttunnel-flutter-client]
+
+**Note**: If your certificate is signed by a trusted CA (e.g., Let's Encrypt), it will be
+automatically omitted from the deep-link to keep it compact. Self-signed
+certificates are included automatically.
+
+##### TOML Format (For CLI Client)
+
+Generate a traditional TOML configuration file:
+
+```shell
+cd /opt/trusttunnel/
+./trusttunnel_endpoint vpn.toml hosts.toml -c <client_name> -a <public_ip> --format toml
+```
+
+This outputs a TOML configuration file suitable for the CLI client.
+
+Both formats contain all necessary information to connect to the endpoint. See the
+[TrustTunnel Flutter Client documentation][trusttunnel-flutter-configuration] for setup instructions.
 
 Congratulations! You've done setting up the endpoint!
 
@@ -275,13 +292,15 @@ Congratulations! You've done setting up the endpoint!
 
 ### Client setup
 
-#### Install the client
-
 You have a choice to use a [CLI client][trusttunnel-client] or a
 [GUI client][trusttunnel-flutter-client] (available on [App Store][app-store]
 and [Play Store][play-store]).
 
-To install the CLI client, run the following command:
+#### Install the client
+
+##### Linux / macOS
+
+An installation script is available:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnelClient/refs/heads/master/scripts/install.sh | sh -s -
@@ -289,7 +308,22 @@ curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnelClient/refs/
 
 The installation script will download the prebuilt package from the latest GitHub release for the appropriate system architecture and unpack it to `/opt/trusttunnel_client`. The output directory could be overridden by specifying `-o DIR` flag at the end of the command above.
 
+> [!NOTE]
+> Install script supports x86_64, aarch64, armv7, mips and mipsel architectures
+> for linux and arm64 and x86_64 for macos.
+
+##### Windows
+
+Download the latest release archive from the
+[TrustTunnel Client releases page][trusttunnel-client-releases].
+
+Extract the archive to a directory of your choice, for example `C:\TrustTunnel\`.
+
+[trusttunnel-client-releases]: https://github.com/TrustTunnel/TrustTunnelClient/releases/latest
+
 #### Updating the client
+
+##### Linux / macOS
 
 The installation script always installs the latest available version.
 So, to update your installation, run the install command again:
@@ -298,19 +332,23 @@ So, to update your installation, run the install command again:
 curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnelClient/refs/heads/master/scripts/install.sh | sh -s -
 ```
 
-> [!NOTE]
-> Don't forget to stop the client before updating (for example, by stopping the running process).
-
 This re-runs the installer and replaces the binaries in the installation directory (`/opt/trusttunnel_client` by default, or the directory you specified with `-o DIR`).
 
 > [!NOTE]
-> Install script supports x86_64, aarch64, armv7, mips and mipsel architectures
-> for linux and arm64 and x86_64 for macos.
+> Don't forget to stop the client before updating (for example, by stopping the running process).
+
+##### Windows
+
+Download the latest release from the
+[releases page][trusttunnel-client-releases] and replace the files
+in your installation directory.
 
 #### Client configuration wizard
 
 The installation directory contains `setup_wizard` binary that helps generate
-the config files required for the client to run:
+the config files required for the client to run.
+
+##### Linux / macOS
 
 ```bash
 cd /opt/trusttunnel_client/
@@ -326,14 +364,19 @@ the following command:
      --settings trusttunnel_client.toml
 ```
 
-where `<endpoint_config>` is path to a config generated by the endpoint.
+##### Windows
+
+```cmd
+setup_wizard.exe --mode non-interactive ^
+    --endpoint_config <endpoint_config> ^
+    --settings trusttunnel_client.toml
+```
+
+In both cases, `<endpoint_config>` is the path to the configuration file
+generated by the endpoint.
 
 `trusttunnel_client.toml` will contain all required configuration for the
-client. To see the full detailed configuration execute the following command:
-
-```bash
-cat /opt/trusttunnel_client/trusttunnel_client.toml
-```
+client.
 
 > [!TIP]
 > The generated configuration contains basic settings to connect to the endpoint.
@@ -353,7 +396,7 @@ cat /opt/trusttunnel_client/trusttunnel_client.toml
 
 #### Running client
 
-To run the client execute the following command:
+##### Linux / macOS
 
 ```bash
 cd /opt/trusttunnel_client/
@@ -362,12 +405,23 @@ sudo ./trusttunnel_client -c trusttunnel_client.toml
 
 `sudo` is required to set up the routes and tun interface.
 
+##### Windows
+
+Open a terminal **as Administrator** and run:
+
+```cmd
+trusttunnel_client.exe -c trusttunnel_client.toml
+```
+
+Administrator privileges are required to set up routes and the TUN interface.
+
 ## See Also
 
 - [CONFIGURATION.md](CONFIGURATION.md) - Configuration documentation
 - [DEVELOPMENT.md](DEVELOPMENT.md) - Development documentation
 - [PROTOCOL.md](PROTOCOL.md) - Protocol specification
 - [CHANGELOG.md](CHANGELOG.md) - Changelog
+- [VERIFY_RELEASES.md](VERIFY_RELEASES.md) - How to verify releases
 
 ## Roadmap
 
