@@ -144,9 +144,16 @@ pub fn decode_tlv_payload(payload: &[u8]) -> Result<DeepLinkConfig> {
             TlvTag::ClientRandomPrefix => {
                 let prefix = decode_string(&value)?;
                 // Validate hex format
-                hex::decode(&prefix).map_err(|e| {
+                let (prefix_part, mask_part) = prefix.split_once('/').unwrap_or((&prefix, ""));
+                hex::decode(prefix_part).map_err(|e| {
                     DeepLinkError::InvalidAddress(format!(
                         "client_random_prefix must be valid hex: {}",
+                        e
+                    ))
+                })?;
+                hex::decode(mask_part).map_err(|e| {
+                    DeepLinkError::InvalidAddress(format!(
+                        "client_random_prefix mask must be valid hex: {}",
                         e
                     ))
                 })?;
@@ -193,7 +200,11 @@ pub fn decode(uri: &str) -> Result<DeepLinkConfig> {
         return Err(DeepLinkError::InvalidScheme(uri.chars().take(20).collect()));
     }
 
-    let encoded = &uri[5..]; // Strip "tt://"
+    // Strip "tt://?" or "tt://"
+    let encoded = uri
+        .strip_prefix("tt://?")
+        .or_else(|| uri.strip_prefix("tt://"))
+        .ok_or(DeepLinkError::InvalidScheme(uri.to_string()))?;
 
     // Decode base64url
     let payload = URL_SAFE_NO_PAD
@@ -280,5 +291,47 @@ mod tests {
     fn test_decode_invalid_scheme() {
         let result = decode("http://example.com");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_legacy_format_without_question_mark() {
+        // Old format tt://Base64 should still be parsed successfully
+        use crate::encode::encode_tlv_payload;
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let config = DeepLinkConfig::builder()
+            .hostname("vpn.example.com".to_string())
+            .addresses(vec!["1.2.3.4:443".to_string()])
+            .username("alice".to_string())
+            .password("secret".to_string())
+            .build()
+            .unwrap();
+
+        let payload = encode_tlv_payload(&config).unwrap();
+        let encoded = URL_SAFE_NO_PAD.encode(&payload);
+
+        // Legacy format without ?
+        let legacy_uri = format!("tt://{}", encoded);
+        let decoded = decode(&legacy_uri).unwrap();
+        assert_eq!(decoded.hostname, "vpn.example.com");
+        assert_eq!(decoded.username, "alice");
+
+        // New format with ?
+        let new_uri = format!("tt://?{}", encoded);
+        let decoded2 = decode(&new_uri).unwrap();
+        assert_eq!(decoded2.hostname, "vpn.example.com");
+        assert_eq!(decoded2.username, "alice");
+    }
+
+    #[test]
+    fn test_decode_client_random_with_mask() {
+        let data = vec![
+            0x0B, 0x09, b'5', b'8', b'4', b'1', b'/', b'7', b'a', b'4', b'3',
+        ];
+        let mut parser = TlvParser::new(&data);
+
+        let (tag, value) = parser.next_field().unwrap().unwrap();
+        assert_eq!(tag, Some(TlvTag::ClientRandomPrefix));
+        assert_eq!(value, b"5841/7a43");
     }
 }

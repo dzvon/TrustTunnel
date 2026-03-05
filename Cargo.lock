@@ -3579,7 +3579,7 @@ dependencies = [
 
 [[package]]
 name = "trusttunnel_endpoint"
-version = "1.0.7"
+version = "1.0.16"
 dependencies = [
  "clap",
  "console-subscriber",
@@ -3610,6 +3610,7 @@ dependencies = [
  "log",
  "once_cell",
  "rcgen",
+ "rustls",
  "serde",
  "tokio",
  "toml",

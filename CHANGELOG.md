@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 1.0.16
+
+- [Fix] HTTP/1.1 codec busy loop when receiving partial request headers.
+
+## 1.0.13
+
+- [Fix] Change deep-link format from `tt://` to `tt://?`. For backward compatibility, `tt://` is still supported.
+
+## 1.0.11
+
+- [Security] Fixed traffic leaking to local network via UDP, ICMP, and SOCKS5 forwarders
+  when `allow_private_network_connections` is set to `false`.
+    - Added `is_global_ip` check to UDP forwarder
+    - Added `is_global_ip` check to ICMP forwarder
+    - Added `is_global_ip` check to SOCKS5 forwarder (TCP and UDP)
+    - Handle IPv4-mapped IPv6 addresses (`::ffff:x.x.x.x`) in `is_global_ip`
+  (Based on [GitHub PR #79](https://github.com/TrustTunnel/TrustTunnel/pull/79) by @andrew-morris)
+
 ## 1.0.7
 
 - [Feature] Added per-client connection limits
